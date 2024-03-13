@@ -1,0 +1,114 @@
+version: '3.9'
+services:
+  metabase-postgres:
+    image: metabase/metabase-enterprise:v1.48.8
+    container_name: metabase-postgres
+    hostname: metabase
+    ports:
+      - 3000:3000
+    volumes: 
+      - /dev/urandom:/dev/random:ro
+    environment: 
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: metabase
+      MB_DB_PORT: 5432
+      MB_DB_USER: metabase
+      MB_DB_PASS: mysecretpassword
+      MB_DB_HOST: pgpool-app-db
+      MB_SITE_URL: https://localhost:8080/
+    cpus: 1
+    mem_limit: 2048m
+    networks: 
+      - metanet1-postgres
+    depends_on: 
+      postgres-app-db:
+        condition: service_healthy
+      postgres-data1:
+        condition: service_healthy
+    healthcheck:
+      test: curl --fail -I http://localhost:3000/api/health || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  pgpool-app-db:
+    image: bitnami/pgpool:4.4.1
+    hostname: pgpool-app-db
+    environment:
+      - PGPOOL_POSTGRES_USERNAME=metabase
+      - PGPOOL_POSTGRES_PASSWORD=mysecretpassword
+      - PGPOOL_BACKEND_NODES=0:postgres-app-db:5432
+      - PGPOOL_SR_CHECK_USER=metabase
+      - PGPOOL_SR_CHECK_PASSWORD=mysecretpassword
+      - PGPOOL_SR_CHECK_DATABASE=metabase
+      - PGPOOL_ADMIN_USERNAME=admin
+      - PGPOOL_ADMIN_PASSWORD=admin
+    networks: 
+      - metanet1-postgres
+  postgres-app-db:
+    image: postgres:16.1-alpine
+    container_name: postgres-app-db
+    hostname: postgres-app-db
+    ports:
+      - 5432:5432
+    environment:
+      - "POSTGRES_USER=metabase"
+      - "POSTGRES_DB=metabase"
+      - "POSTGRES_PASSWORD=mysecretpassword"
+    # volumes:
+    #   - $PWD/postgres_origin:/var/lib/postgresql/data
+    networks: 
+      - metanet1-postgres
+    cpus: 1
+    mem_limit: 128m
+    # command: -c log_statement=all
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metabase -d metabase"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  setup-postgres:
+    image: bash:5.2.15
+    container_name: setup-postgres
+    volumes:
+      - $PWD/setup:/tmp
+    networks:
+      - metanet1-postgres
+    depends_on:
+      metabase-postgres:
+        condition: service_healthy
+    command: sh /tmp/metabase-setup.sh metabase:3000
+    cpus: 1
+    mem_limit: 128m
+  pgpool-data-1:
+    image: bitnami/pgpool:4.5.1
+    hostname: pgpool-data-db
+    environment:
+      - PGPOOL_POSTGRES_USERNAME=metabase
+      - PGPOOL_POSTGRES_PASSWORD=metasample123
+      - PGPOOL_BACKEND_NODES=0:postgres-data1:5432
+      - PGPOOL_SR_CHECK_USER=metabase
+      - PGPOOL_SR_CHECK_PASSWORD=metasample123
+      - PGPOOL_SR_CHECK_DATABASE=sample
+      - PGPOOL_ADMIN_USERNAME=admin
+      - PGPOOL_ADMIN_PASSWORD=admin
+    networks: 
+      - metanet1-postgres
+  postgres-data1:
+    image: metabase/qa-databases:postgres-sample-12
+    container_name: postgres-data1
+    ports:
+      - 5434:5432
+    hostname: postgres-data1
+    networks: 
+      - metanet1-postgres
+    cpus: 4
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metabase -d sample"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: -c log_statement=all
+networks: 
+  metanet1-postgres:
+    driver: bridge
